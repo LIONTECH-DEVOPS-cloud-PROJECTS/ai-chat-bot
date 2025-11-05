@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 import requests
 import json
 from datetime import datetime
+import os
 
 app = FastAPI()
 
@@ -45,6 +46,7 @@ class WhatsAppClient:
         
         try:
             response = requests.post(self.url, headers=headers, json=data)
+            print(f"WhatsApp API response: {response.status_code}")
             return response.json()
         except Exception as e:
             print(f"Error sending text message: {e}")
@@ -69,6 +71,7 @@ class ChatEngine:
     def handle_message(self, user_id, message):
         session = self.get_session(user_id)
         current_stage = session['stage']
+        print(f"User {user_id} at stage {current_stage} with message: {message}")
         
         if current_stage == 'welcome':
             return self.handle_welcome(user_id, message)
@@ -341,18 +344,34 @@ We have various programs and support options available!"""
 whatsapp_client = WhatsAppClient()
 chat_engine = ChatEngine()
 
+@app.get("/")
+async def root():
+    return {"message": "Nyonga Chatbot is running!", "status": "active"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "nyonga-chatbot"}
+
 @app.get("/webhook")
 async def verify_webhook(request: Request):
+    # Parse params from the webhook verification request
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
     
+    print(f"Webhook verification - Mode: {mode}, Token: {token}")
+    
+    # Check if a token and mode were sent
     if mode and token:
+        # Check the mode and token sent are correct
         if mode == "subscribe" and token == VERIFY_TOKEN:
+            # Respond with 200 OK and challenge token from the request
             print("WEBHOOK_VERIFIED")
             return JSONResponse(content=int(challenge))
         else:
+            # Respond with '403 Forbidden' if verify tokens do not match
             raise HTTPException(status_code=403)
+    
     raise HTTPException(status_code=400)
 
 @app.post("/webhook")
@@ -361,6 +380,7 @@ async def handle_webhook(request: Request):
         body = await request.json()
         print(f"Incoming webhook received")
         
+        # Check if it's a WhatsApp API event
         if 'entry' in body:
             for entry in body['entry']:
                 for change in entry.get('changes', []):
@@ -372,7 +392,7 @@ async def handle_webhook(request: Request):
     
     except Exception as e:
         print(f"Error processing webhook: {e}")
-        return JSONResponse(content={"status": "error"}, status_code=500)
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 async def process_message(message):
     try:
@@ -383,29 +403,26 @@ async def process_message(message):
             user_message = message['text']['body']
             print(f"Processing message from {user_id}: {user_message}")
             
+            # Get response from chat engine
             response = chat_engine.handle_message(user_id, user_message)
             
+            # Send response via WhatsApp
             if response['type'] == 'text':
-                whatsapp_client.send_text_message(user_id, response['message'])
+                result = whatsapp_client.send_text_message(user_id, response['message'])
+                print(f"Message sent result: {result}")
         
     except Exception as e:
         print(f"Error processing message: {e}")
+        # Send error message to user
         try:
             whatsapp_client.send_text_message(
                 user_id,
                 "I apologize, but I'm experiencing technical difficulties. Please try again in a moment or contact us directly at +1647-381-8836"
             )
-        except:
-            pass
+        except Exception as send_error:
+            print(f"Failed to send error message: {send_error}")
 
-@app.get("/")
-async def root():
-    return {"message": "Nyonga Chatbot is running!", "status": "active"}
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "service": "nyonga-chatbot"}
-
+# For local testing
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
