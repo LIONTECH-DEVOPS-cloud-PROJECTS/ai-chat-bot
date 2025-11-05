@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "routes": [
+    { "src": "/api/webhook", "methods": ["GET", "POST"], "dest": "api/webhook.js" },
+    { "src": "/api/health", "methods": ["GET"], "dest": "api/health.js" }
+  ]
+}
